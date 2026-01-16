@@ -1,0 +1,6 @@
+name: edgex
+enabled: true
+symbols:
+  - BTC-USDC-PERP
+  - ETH-USDC-PERP
+

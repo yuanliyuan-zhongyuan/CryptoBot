@@ -1,0 +1,25 @@
+# ============================================================================
+# CryptoTrade 学习项目 - 网格策略基础配置（Grid Basic）
+# ----------------------------------------------------------------------------
+# 用途：
+# - 定义一个最小可运行的“分段价差监控”网格策略
+# - 与 TradingCoordinator + GridRunner + GridEngine 搭配使用
+# - 后续可以按交易对扩展更细的参数（单独 symbol_configs）
+# ============================================================================
+type: grid_basic
+
+system_mode:
+  monitor_only: true         # true=仅监控，不下单；false=未来可扩展为实盘
+
+default_config:
+  grid_config:
+    # --- 全局基础网格参数（所有 symbol 默认使用） ---
+    initial_spread_threshold: 0.01   # 第 1 段触发阈值（1%）
+    grid_step: 0.005                 # 每多一段所需额外变化（0.5%）
+    max_segments: 6                  # 最大网格段数上限
+
+# 参与该策略的交易对列表（在所有启用交易所上统一监控）
+symbols:
+  - BTC-USDC-PERP
+  - ETH-USDC-PERP
+
