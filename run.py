@@ -71,3 +71,7 @@ def cli():
     # 🔁 把异步 main 包一层，方便作为 console script 入口
     asyncio.run(main())
 
+
+if __name__ == "__main__":
+    cli()
+
