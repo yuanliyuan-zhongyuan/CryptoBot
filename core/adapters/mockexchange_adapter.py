@@ -20,39 +20,23 @@ import asyncio
 import random
 from typing import Dict, List, Callable
 
+from .exchange_adapter import ExchangeAdapter
 
-class MockExchange:
+
+class MockExchange(ExchangeAdapter):
     def __init__(self, name: str, symbols: List[str]):
-        # 🆔 交易所基本信息
-        self.name = name
-        self.symbols = symbols
-        # ⚙️ 运行状态控制
-        self.running = False
-        self.tasks: List[asyncio.Task] = []
-        # 📡 订阅管理：Symbol -> 回调函数列表
-        self.subscribers: Dict[str, List[Callable]] = {}
+        super().__init__(name, symbols)
 
     async def start(self):
-        """启动交易所：为每个交易对创建模拟行情推送任务"""
         self.running = True
-        # 1️⃣ 遍历所有交易对，启动独立的数据流任务
         for s in self.symbols:
             self.tasks.append(asyncio.create_task(self._stream(s)))
-        # print(f"🚀 [{self.name}] 已启动，监控: {self.symbols}")
 
     async def stop(self):
-        """停止交易所：取消所有后台任务"""
         self.running = False
-        # 2️⃣ 优雅关闭所有行情任务
         for t in self.tasks:
             t.cancel()
         self.tasks = []
-        # print(f"🛑 [{self.name}] 已停止")
-
-    def subscribe(self, symbol: str, cb: Callable):
-        """订阅接口：注册回调函数接收行情数据"""
-        # 📝 简单的观察者模式：当有新行情时调用 cb(data)
-        self.subscribers.setdefault(symbol, []).append(cb)
 
     async def _stream(self, symbol: str):
         """内部数据流：模拟生成随机行情"""
@@ -75,4 +59,3 @@ class MockExchange:
                 
             # ⏱️ 模拟网络延迟 / 推送频率 (0.5s)
             await asyncio.sleep(0.5)
-

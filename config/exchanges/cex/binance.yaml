@@ -6,9 +6,115 @@
 # - 指定该交易所在本地模拟中参与哪些交易对
 # - 仅作为轻量配置，后续可逐步扩展为真实 API 配置
 # ============================================================================
-name: binance           # 交易所标识（与代码中的 name 对应）
-enabled: true           # 是否启用该交易所（false 时会被跳过）
-symbols:                # 本交易所参与监控/策略的合约列表
-  - BTC-USDC-PERP
-  - ETH-USDC-PERP
+binance:
+  # API连接配置
+  api:
+    environment: mainnet                     # 运行环境：mainnet 或 testnet
+    base_urls:                               # HTTP REST 基础域名列表（按文档顺序列出）
+      - https://api.binance.com              # 官方默认入口（优先使用）
+      - https://api-gcp.binance.com          # GCP 加速入口
+      - https://api1.binance.com             # 备用节点 1
+      - https://api2.binance.com             # 备用节点 2
+      - https://api3.binance.com             # 备用节点 3
+      - https://api4.binance.com             # 备用节点 4
+    base_url: https://api.binance.com        # 当前选用的基础URL（代码可从 base_urls 中自动选择填充）
+    ws_base_urls:                            # WebSocket 行情基础域名列表
+      - wss://stream.binance.com:9443        # 默认端口 9443（文档推荐）
+      - wss://stream.binance.com:443         # 备用端口 443
+    ws_url: wss://stream.binance.com:9443    # 当前选用的 WebSocket URL（代码可从 ws_base_urls 中自动选择）
 
+    futures_base_urls:                       # U本位合约 REST 基础域名列表
+      - https://fapi.binance.com             # 官方默认入口
+    futures_base_url: https://fapi.binance.com # 当前选用的合约基础URL
+
+    futures_ws_base_urls:                    # U本位合约 WebSocket 基础域名列表
+      - wss://ws-fapi.binance.com/ws-fapi/v1 # 官方默认入口
+    futures_ws_url: wss://ws-fapi.binance.com/ws-fapi/v1 # 当前选用的合约WebSocket URL
+    
+    futures_market_ws_base_urls:             # U本位合约「行情流」WebSocket 基础域名列表
+      - wss://fstream.binance.com            # 行情流主域（/ws 或 /stream）
+    futures_market_ws_testnet_base_urls:     # U本位合约测试网「行情流」WebSocket 基础域名列表
+      - wss://stream.binancefuture.com       # 测试网行情流主域（/ws 或 /stream）
+
+    testnet_base_urls:                       # Testnet REST 基础域名列表
+      - https://demo-fapi.binance.com        # 官方测试网入口
+    testnet_base_url: https://demo-fapi.binance.com # 当前选用的测试网基础URL
+
+    testnet_ws_base_urls:                    # Testnet WebSocket 基础域名列表
+      - wss://testnet.binancefuture.com/ws-fapi/v1 # 官方测试网 API WebSocket（支持 SUBSCRIBE）
+      - wss://fstream.binancefuture.com      # 官方测试网合并流入口（本项目订阅协议不使用）
+    testnet_ws_url: wss://testnet.binancefuture.com/ws-fapi/v1 # 当前选用的测试网 WebSocket URL（与订阅协议兼容）
+    timeout: 30                              # API请求超时时间(秒)
+  
+  # 认证配置（价格监控不需要API密钥，只用于公开数据）
+  authentication:
+    api_key: ''                              # API密钥（留空即可）
+    api_secret: ''                           # API密钥（留空即可）
+
+  # 交易所信息
+  exchange_id: binance
+  name: Binance
+  enabled: true
+
+  # 市场配置
+  markets:
+    spot:
+      enabled: true                          # 启用现货市场
+    USD-M Futures:
+      enabled: true                          # 启用U本位市场
+  
+  # WebSocket配置
+  websocket:
+    enabled: true
+    auto_reconnect: true                     # 是否自动重连
+    max_reconnect_attempts: 5                # 最大重连尝试次数
+    reconnect_delay: 5                       # 重连延迟(秒)
+    ping_interval: 30                        # Ping间隔(秒)
+    ping_timeout: 10                         # Ping超时(秒)
+  
+  # 错误处理
+  error_handling:
+    max_retries: 3                           # 最大重试次数
+    retry_delay: 1                           # 重试延迟(秒)
+    retry_backoff: 2                         # 重试退避倍数
+  
+  # 速率限制
+  rate_limits:
+    requests_per_second: 10                  # 每秒请求数限制
+    requests_per_minute: 1200                # 每分钟请求数限制
+    weight_per_minute: 1200                  # 每分钟权重限制
+  
+  # 符号列表（常用交易对）
+  symbols:
+    spot:
+      - BTC/USDT                             # BTC现货
+      - ETH/USDT                             # ETH现货
+      - SOL/USDT                             # SOL现货
+      - BNB/USDT                             # BNB现货
+      - ADA/USDT                             # ADA现货
+      - DOGE/USDT                            # DOGE现货
+      - XRP/USDT                             # XRP现货
+      - AVAX/USDT                            # AVAX现货
+    
+    USD-M Futures:
+      - BTCUSDT                              # BTC U本位永续（标准符号）
+      - ETHUSDT                              # ETH U本位永续（标准符号）
+      - SOLUSDT                              # SOL U本位永续（标准符号）
+      - BNBUSDT                              # BNB U本位永续（标准符号）
+  
+  # 精度配置
+  precision:
+    BTC/USDT:
+      amount: 5
+      price: 2
+    ETH/USDT:
+      amount: 4
+      price: 2
+    SOL/USDT:
+      amount: 2
+      price: 3
+  
+  # 费率配置
+  fees:
+    maker: 0.001                             # Maker费率 0.1%
+    taker: 0.001                             # Taker费率 0.1%

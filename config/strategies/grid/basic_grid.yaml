@@ -7,9 +7,11 @@
 # - 后续可以按交易对扩展更细的参数（单独 symbol_configs）
 # ============================================================================
 type: grid_basic
+enabled: false              # 是否启用该策略（false=完全不跑策略，仅订阅行情）
 
 system_mode:
   monitor_only: true         # true=仅监控，不下单；false=未来可扩展为实盘
+  print_tickers: true        # 是否在终端打印实时行情（只看行情模式用）
 
 default_config:
   grid_config:
@@ -20,6 +22,5 @@ default_config:
 
 # 参与该策略的交易对列表（在所有启用交易所上统一监控）
 symbols:
-  - BTC-USDC-PERP
-  - ETH-USDC-PERP
-
+  - BTC/USDT
+  - ETH/USDT

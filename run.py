@@ -20,7 +20,8 @@ CryptoTrade 学习项目 - 最小可运行入口
 import asyncio
 import argparse
 from pathlib import Path
-from cryptotrade.core.trading_coordinator import TradingCoordinator
+import logging
+from cryptotrade.core.coordinators import TradingCoordinator
 
 
 def parse_args():
@@ -31,6 +32,7 @@ def parse_args():
     # - risk：风险配置文件（最大仓位、最大亏损等）
     # - duration：运行时长（秒），方便你在学习阶段控制演示时间
     p = argparse.ArgumentParser(description="CryptoTrade - Coordinator/Runner/Engine 示例入口")
+    # 当前脚本所在绝对路径（用于定位配置文件）
     base = Path(__file__).resolve().parent
     p.add_argument("--cex-dir", type=Path, default=base / "config/exchanges/cex")
     p.add_argument("--dex-dir", type=Path, default=base / "config/exchanges/dex")
@@ -42,6 +44,7 @@ def parse_args():
 
 async def main():
     """异步主函数：负责把参数和核心协调器串起来"""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
     # 1️⃣ 解析外部参数
     args = parse_args()
     # 2️⃣ 创建交易协调器（TradingCoordinator）
