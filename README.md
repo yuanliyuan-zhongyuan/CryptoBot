@@ -2,7 +2,7 @@
 
 这是一个现代化的 Python 量化交易系统骨架，用于学习和演示量化策略（如网格、套利）的执行流程。
 
-项目目前已升级为支持 **WebSocket 实时行情**，具备生产级的连接管理能力，能够同时接入现货与合约市场的真实数据。
+项目目前已升级为支持 **WebSocket 实时行情** 和 **REST API 交互**，具备生产级的连接管理能力，能够同时接入现货与合约市场的真实数据。
 
 ---
 
@@ -11,6 +11,7 @@
 - **实时数据流**：基于 `websockets` 实现的高性能异步行情接入。
 - **智能节点优选**：自动检测并选择延迟最低的交易所 WebSocket 节点。
 - **多市场并行**：支持同时连接 Binance Spot（现货）和 Binance USDM（U本位合约）。
+- **REST API 集成**：内置 `aiohttp` 异步客户端，支持账户查询、挂单管理及历史数据获取。
 - **可扩展架构**：通过 `pyproject.toml` 管理依赖，支持模块化扩展。
 
 ---
@@ -35,11 +36,13 @@ pip install -e .[async]
 
 > **说明**：
 > - `-e` 模式意味着你修改本地代码后，无需重新安装即可生效。
-> - `[async]` 选项会自动安装 `websockets` 等异步网络库。
-> - 安装完成后，系统会自动注册一个 `cryptotrade-run` 的命令行工具。
+> - `[async]` 选项会自动安装 `websockets`、`aiohttp` 等异步网络库。
+> - 安装完成后，系统会自动注册 `cryptotrade-run` 和 `cryptotrade-rest` 命令行工具。
 
 ### 3. 运行演示
-直接在终端输入以下命令即可启动实时行情监控：
+
+#### 方式 A：实时行情监控 (WebSocket)
+直接在终端输入以下命令启动策略协调器：
 
 ```powershell
 cryptotrade-run
@@ -50,29 +53,43 @@ cryptotrade-run
 ```text
 INFO [WS.binance-spot] ✅ 选中最佳节点: wss://stream.binance.com:443/ws (延迟 875.00ms)
 INFO [cryptotrade.ticker] binance-spot BTC/USDT bid=91028.1900 ask=91028.2000
-INFO [cryptotrade.ticker] binance-usdm BTC/USDT bid=90993.9000 ask=90994.0000
+```
+
+#### 方式 B：API 功能测试 (REST)
+用于测试 API 连通性、账户余额及持仓查询：
+
+```powershell
+cryptotrade-rest
+```
+
+输出示例：
+```text
+INFO - ✅ [Binance REST] API Key 已配置
+INFO - 💰 [3/5] 测试私有接口: 获取账户余额...
+INFO -    - USDT (Futures): 可用=16.2444, 冻结=11.6328
 ```
 
 ---
 
 ## ⚙️ 进阶用法
 
-### 自定义运行参数
-`cryptotrade-run` 支持多种参数，用于指定配置文件路径或运行时长。
+### 真实交易 vs 模拟回测
+系统根据配置文件自动决定连接真实交易所还是使用 Mock 数据。
 
-```powershell
-# 查看所有可用参数
-cryptotrade-run --help
+1. **启用真实交易 (Binance)**:
+   - 修改 `config/exchanges/cex/binance.yaml`
+   - 设置 `markets.spot.enabled: true` 或 `markets.USD-M Futures.enabled: true`
+   - 系统会自动加载 `BinanceAdapter` 并连接真实 WebSocket。
 
-# 示例：运行 60 秒后自动优雅退出
-cryptotrade-run --duration 60
-```
+2. **使用模拟数据 (Mock)**:
+   - 确保 `binance.yaml` 中所有 markets 均为 `false`。
+   - 系统会自动回退到 `MockExchange`，生成随机漫步价格数据（无需联网）。
 
 ### 核心参数说明
+`cryptotrade-run` 支持多种参数：
 - `--cex-dir`: CEX 交易所配置目录（默认：`config/exchanges/cex`）
-- `--dex-dir`: DEX 交易所配置目录（默认：`config/exchanges/dex`）
 - `--strategy`: 策略配置文件路径（默认：`config/strategies/grid/basic_grid.yaml`）
-- `--risk`: 风控配置文件路径（默认：`config/risk/risk.yaml`）
+- `--duration`: 运行时长（秒），例如 `--duration 60`
 
 ---
 
@@ -86,46 +103,66 @@ d:\CryptoTrade\
 │   └── risk/                   # 全局风控参数
 ├── core/                       # 核心架构层（系统骨架）
 │   ├── adapters/               # 协议适配层：抹平不同交易所差异
-│   │   ├── websocket_manager.py    # WebSocket 通用基类 (定义连接/心跳标准)
-│   │   └── binance_adapter.py      # Binance 业务适配 (数据清洗/标准化)
+│   │   ├── websocket_manager.py    # WebSocket 通用基类
+│   │   ├── binance_adapter.py      # Binance 业务适配 (混合 WS/REST)
+│   │   └── models.py               # 统一数据模型 (Ticker/Order/Position)
 │   └── coordinators/           # 业务协调层
 │       └── trading_coordinator.py  # 系统大脑：分发行情、调度策略
 ├── exchanges/                  # 交易所底层驱动层
 │   ├── cex/
 │   │   └── binance/
-│   │       └── websocket.py    # Binance 真实 WebSocket 客户端 (处理 Ping/Pong)
+│   │       ├── websocket.py    # Binance 真实 WebSocket 客户端
+│   │       ├── rest.py         # Binance REST API 客户端
+│   │       └── base.py         # 基础常量与配置
 │   └── mock/                   # 模拟交易所 (用于回测/调试)
-├── strategies/                 # 量化策略实现层
-│   ├── grid/                   # 网格交易策略
-│   └── arbitrage/              # 套利策略
 ├── pyproject.toml              # 项目依赖与构建配置
-├── run.py                      # 程序启动入口
+├── run.py                      # 策略运行入口 (cryptotrade-run)
+├── run_rest.py                 # REST 测试入口 (cryptotrade-rest)
 └── README.md                   # 项目说明书
 ```
 
 ---
 
+## ❓ FQA常见问题 (Troubleshooting)
+
+### Q1: `ModuleNotFoundError: No module named 'cryptotrade'`
+**原因**：未正确安装项目包，或者在非项目根目录运行。
+**解决**：
+1. 确保在 `d:\CryptoTrade` 目录下。
+2. 执行 `pip install -e .[async]` 重新注册包。
+3. 如果仍报错，可以直接使用 Python 运行脚本（已内置路径回退支持）：
+   ```powershell
+   python run.py
+   # 或
+   python run_rest.py
+   ```
+
+### Q2: WebSocket 连接超时 / 无法连接
+**原因**：国内网络环境无法直接访问 Binance API。
+**解决**：
+- 确保使用了全局代理或 VPN。
+- 检查 `config/exchanges/cex/binance.yaml` 中的 `ws_base_urls` 配置，尝试更换节点。
+
+---
+
 ## ⚠️ 注意事项
 
-1. **网络连接**：
-   由于接入的是真实交易所（Binance）的 WebSocket，请确保你的网络环境能够正常访问这些服务。
+1. **配置文件路径**：
+   项目已配置智能路径锚定。无论你在哪个目录下执行命令，它都能自动找到项目内部的默认配置文件。
 
-2. **配置文件路径**：
-   项目已配置智能路径锚定。无论你在哪个目录下执行 `cryptotrade-run`，它都能自动找到项目内部的默认配置文件。
-
-3. **私有配置（API Key）**：
-   - 目前处于**行情只读模式**，无需 API Key。
-   - 未来如果接入交易功能，**严禁**在版本控制（Git）中提交真实的 API Key。建议使用环境变量或在 `.gitignore` 排除的本地目录中存储私有配置。
+2. **私有配置（API Key）**：
+   - 目前处于**行情只读模式**，无需 API Key 即可获取 Public Data。
+   - 若需测试账户接口，请在 `binance.yaml` 中填入 Key，但**严禁**提交到 Git。建议使用环境变量。
 
 ---
 
 ## 🛠️ 开发指南
 
 ### 添加新依赖
-如果需要引入新的库（例如 `httpx`），请修改 `pyproject.toml` 中的 `dependencies` 列表，然后再次执行：
+如果需要引入新的库，请修改 `pyproject.toml` 中的 `dependencies` 列表，然后再次执行：
 ```powershell
 pip install -e .[async]
 ```
 
 ### 扩展交易所
-参考 `core/adapters/binance_adapter.py`，实现新的 Adapter 类并注册到系统中，即可支持 OKX、Bybit 等其他交易所。
+参考 `core/adapters/binance_adapter.py`，实现新的 Adapter 类并注册到 `TradingCoordinator` 中，即可支持 OKX、Bybit 等其他交易所。

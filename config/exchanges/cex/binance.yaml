@@ -48,8 +48,8 @@ binance:
   
   # 认证配置（价格监控不需要API密钥，只用于公开数据）
   authentication:
-    api_key: ''                              # API密钥（留空即可）
-    api_secret: ''                           # API密钥（留空即可）
+    api_key: 'LJvlm4rB1VtxxhZCW1mAF4FcUuOCsH2GLopZOEboQJ9W39KVeI648SvhwR0TADk3'       # API公钥 就是身份识别（我是谁）公开
+    api_secret: 'DmHw0COGWRlCGrTOJkf0XheC6ABt7TOihYUUZOtcfbM8VEbknonmNpchjtFteBXq'    # API密钥 是数字签名（验证真伪）绝密，只显示创建的那次
 
   # 交易所信息
   exchange_id: binance
