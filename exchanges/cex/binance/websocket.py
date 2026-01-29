@@ -4,8 +4,11 @@ import ssl
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from decimal import Decimal
 
 from cryptotrade.core.adapters.websocket_manager import WebSocketManager
+from cryptotrade.exchanges.cex.binance.base import BinanceBase
+from cryptotrade.core.adapters.models import TickerData
 
 try:
     import websockets
@@ -13,33 +16,46 @@ except ImportError:
     websockets = None
 
 
-class BinanceWebSocket(WebSocketManager):
+class BinanceWebSocket(WebSocketManager, BinanceBase):
     """
     Binance 专用 WebSocket 客户端
-
+    
+    继承体系：
+    - WebSocketManager: 提供连接管理、回调分发等通用 WebSocket 能力
+    - BinanceBase: 提供 Binance 特有的配置解析、符号转换等基础能力
+    
     作用：
     - 根据配置中现货 / U 本位开关，自动选择合适的 WebSocket 节点
     - 建立与 Binance 的长连接，发送 SUBSCRIBE 订阅 bookTicker 流
     - 将 Binance 原始行情转换为统一字典，并通过 WebSocketManager._emit 向上层广播
-
+    
     数据流：
-        Binance WebSocket ➜ BinanceWebSocket._handle_message ➜ _emit(formatted)
-        ➜ BinanceAdapter._on_ticker ➜ TradingCoordinator.on_ticker
+    Binance WebSocket ➜ BinanceWebSocket._handle_message ➜ _emit(formatted)
+    ➜ BinanceAdapter._on_ticker ➜ TradingCoordinator.on_ticker
     """
 
     def __init__(self, name: str, symbols: List[str], config: Optional[Dict[str, Any]] = None) -> None:
-        super().__init__(name=name)
+        # 初始化两个父类
+        WebSocketManager.__init__(self, name=name)
+        BinanceBase.__init__(self, config=config)
+        
         if websockets is None:
             raise ImportError("缺少 websockets 库，无法连接 Binance WebSocket，请先安装依赖")
+            
         self.symbols = symbols or []
-        self.config = config or {}
+        # 注意：self.config 已经在 BinanceBase.__init__ 中设置
+        
         self._tasks: List[asyncio.Task] = []
         self._ws = None
         self._running = False
+        
+        # 覆盖 BinanceBase 的 ws_url (因为这里需要动态测速选择)
         self.ws_url: Optional[str] = None
+        
         self.symbol_map: Dict[str, str] = {}
         for s in self.symbols:
-            norm = self._normalize_symbol(s)
+            # 使用 BinanceBase 提供的通用方法
+            norm = self.normalize_symbol(s)
             self.symbol_map[norm] = s
 
     async def connect(self) -> None:
@@ -161,29 +177,30 @@ class BinanceWebSocket(WebSocketManager):
 
     async def _send_subscribe(self) -> None:
         """
-        构造并发送 Binance 订阅请求 (SUBSCRIBE)
-        使用 bookTicker 频道订阅最优买卖价
+        构造并发送订阅消息
         """
-        if not self.symbols or not self._ws:
+        if not self._ws or not self.symbols:
             return
-        streams = []
-        for s in self.symbols:
-            norm = self._normalize_symbol(s)
-            streams.append(f"{norm}@bookTicker")
+        
+        # 使用 BinanceBase.BinanceStreamType 提供的常量
+        stream_type = self.BinanceStreamType.TICKER
+        params = [
+            f"{self.normalize_symbol(s).lower()}@{stream_type}" for s in self.symbols
+        ]
         payload = {
             "method": "SUBSCRIBE",
-            "params": streams,
-            "id": 1,
+            "params": params,
+            "id": int(time.time() * 1000),
         }
         await self._ws.send(json.dumps(payload))
-        self.logger.info(f"📡 [{self.name}] 已发送订阅请求: {streams}")
+        self.logger.info(f"📡 已发送订阅请求: {params}")
 
     async def _handle_message(self, message: str) -> None:
         """
         处理 WebSocket 原始消息
         - 解析 JSON
         - 提取 bookTicker 数据 (bid/ask)
-        - 格式化为统一字典
+        - 构造 TickerData 对象
         - 调用基类 _emit 广播
         """
         try:
@@ -195,28 +212,24 @@ class BinanceWebSocket(WebSocketManager):
                 target_symbol = self.symbol_map.get(symbol_raw)
                 if not target_symbol:
                     return
-                formatted = {
-                    "symbol": target_symbol,
-                    "bid": float(data["b"]),
-                    "ask": float(data["a"]),
-                    "exchange": self.name,
-                    "timestamp": datetime.now().timestamp(),
-                }
-                await self._emit(formatted)
+                
+                ticker = TickerData(
+                    symbol=target_symbol,
+                    timestamp=datetime.now(),
+                    exchange=self.name,
+                    bid=Decimal(str(data["b"])),
+                    ask=Decimal(str(data["a"])),
+                    bid_size=Decimal(str(data["B"])),
+                    ask_size=Decimal(str(data["A"])),
+                    raw_data=data
+                )
+                await self._emit(ticker)
         except Exception as e:
             self.logger.error(f"消息处理错误: {e}")
 
-    def _normalize_symbol(self, s: str) -> str:
+    def _normalize_symbol(self, symbol: str) -> str:
         """
-        标准化交易对符号
-        例如: "BTC/USDT" -> "btcusdt"
-        兼容: "BTC-USDT", "BTC_USDT", "BTCUSDT"
+        已弃用：请使用 BinanceBase.normalize_symbol
+        保留此方法仅为了兼容旧代码，直接代理到父类方法
         """
-        t = s.strip().upper()
-        t = t.replace("/", "").replace("_", "").replace("-", "")
-        t = s.upper().replace("/", "").replace("_", "").replace("-", "")
-        if "PERP" in t:
-            t = t.replace("PERP", "")
-        if ":" in t:
-            t = t.split(":")[0]
-        return t.lower()
+        return self.normalize_symbol(symbol)

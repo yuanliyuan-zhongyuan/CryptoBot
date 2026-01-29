@@ -190,10 +190,10 @@ async def main():
     else:
         logger.error("初始化失败")
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
 def cli():
     """同步入口：供 `cryptotrade-rest` 等命令行直接调用"""
     # 🔁 把异步 main 包一层，方便作为 console script 入口
     asyncio.run(main())
+    
+if __name__ == "__main__":
+    cli()

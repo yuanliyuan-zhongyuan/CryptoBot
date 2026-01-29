@@ -164,17 +164,30 @@ class TradingCoordinator:
         """
         return bool(self.strategy_config.get("system_mode", {}).get("monitor_only", True))
 
-    def on_ticker(self, data: Dict[str, Any]):
+    def on_ticker(self, data: Any):
         """
         行情回调：处理接收到的 Ticker 数据
+        - 支持 Dict (兼容旧代码/Mock) 和 TickerData 对象 (新架构)
         - 更新内存中的最新报价 (self.latest)
         - 控制台打印行情 (如果 print_tickers 为 True)
         - 将数据转发给当前活跃的 Runner (Grid/Arbitrage)
         """
-        symbol = data["symbol"]
-        ex = data["exchange"]
+        if hasattr(data, "symbol"):
+            # TickerData 对象
+            symbol = data.symbol
+            ex = data.exchange
+            bid = float(data.bid)
+            ask = float(data.ask)
+        else:
+            # 字典兼容
+            symbol = data["symbol"]
+            ex = data["exchange"]
+            bid = float(data["bid"])
+            ask = float(data["ask"])
+
         entry = self.latest.setdefault(symbol, {})
-        entry[ex] = {"bid": float(data["bid"]), "ask": float(data["ask"])}
+        entry[ex] = {"bid": bid, "ask": ask}
+        
         if self.print_tickers:
             key = f"{ex}:{symbol}"
             now = asyncio.get_event_loop().time()
@@ -184,8 +197,8 @@ class TradingCoordinator:
                     "%s %s bid=%.4f ask=%.4f",
                     ex,
                     symbol,
-                    float(data["bid"]),
-                    float(data["ask"]),
+                    bid,
+                    ask,
                 )
                 self._last_print_ts[key] = now
         if self.runner:

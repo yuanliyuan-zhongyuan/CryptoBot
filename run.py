@@ -21,7 +21,7 @@ import asyncio
 import argparse
 from pathlib import Path
 import logging
-from cryptotrade.core.coordinators import TradingCoordinator
+from cryptotrade.core.coordinators.trading_coordinator import TradingCoordinator
 
 
 def parse_args():
@@ -74,3 +74,5 @@ def cli():
     # 🔁 把异步 main 包一层，方便作为 console script 入口
     asyncio.run(main())
 
+if __name__ == "__main__":
+    cli()
