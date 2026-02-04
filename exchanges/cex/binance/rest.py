@@ -170,6 +170,18 @@ class BinanceRest(BinanceBase):
         包含所有交易对的规则、精度等信息。
         """
         return await self._request("GET", BinanceRestEndpoint.EXCHANGE_INFO)
+        
+    async def get_futures_exchange_info(self) -> Dict:
+        """
+        ℹ️ 获取合约交易所信息 (U本位)
+        包含所有合约交易对的规则、精度等信息。
+        """
+        original_base_url = self.base_url
+        self.base_url = self.futures_base_url
+        try:
+            return await self._request("GET", BinanceRestEndpoint.FUTURES_EXCHANGE_INFO)
+        finally:
+            self.base_url = original_base_url
 
     async def get_ticker(self, symbol: str) -> Optional[TickerData]:
         """

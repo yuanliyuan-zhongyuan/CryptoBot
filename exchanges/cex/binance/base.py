@@ -79,11 +79,14 @@ class BinanceBase:
         OrderType.LIMIT: 'LIMIT'
     }
 
-    # 📡 WebSocket 订阅类型常量
+    # 📡 WebSocket 订阅类型常量 
+    # 因为需要监控，所以添加了一些流
     class BinanceStreamType(str, Enum):
         """WebSocket 数据流类型"""
-        TICKER = "bookTicker"  # 📊 最优买卖价
-        TRADE = "trade"        # 🤝 实时成交
+        BOOK_TICKER = "bookTicker"  # 📊 最优买卖价 (原 TICKER)
+        TICKER = "bookTicker"       # 兼容旧代码，指向 bookTicker
+        TICKER_24H = "ticker"       # 📈 24小时统计 (含涨跌幅)
+        TRADE = "trade"             # 🤝 实时成交
         DEPTH = "depth"        # 🌊 深度信息
         KLINE = "kline"        # 🕯️ K线数据
         USER_DATA = "userData" # 👤 用户数据流 (订单、账户更新)

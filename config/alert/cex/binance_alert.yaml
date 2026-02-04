@@ -1,0 +1,168 @@
+# ==============================================================================
+# Binance 现货/合约 价格监控与报警配置文件
+# ==============================================================================
+# 本配置文件用于 CryptoTrade 小项目的 run_monitor.py 脚本。
+# 专门针对 Binance 交易所进行价格监控，支持 24小时涨跌幅、短期波动率及价格目标报警。
+#
+# 使用说明：
+# 1. 运行脚本：python -m cryptotrade.run_monitor
+# 2. 修改配置：直接编辑本文件，保存后重启脚本即可生效
+# ==============================================================================
+
+binance_alert:
+  
+  # ============================================================================
+  # 基础设置
+  # ============================================================================
+  exchange: "binance"
+  
+  # 全局报警设置
+  alert:
+    sound: true               # 是否开启声音报警 (Windows下为蜂鸣声，Mac/Linux为系统提示音)
+    cooldown: 60              # 报警冷却时间 (秒)，同一币种在此时间内不会重复报警
+
+  # 界面显示设置
+  display:
+    refresh_interval: 1       # 界面刷新间隔 (秒)
+    show_columns:                  # 显示的列
+      - symbol                     # 代币符号
+      - price                      # 当前价格
+      - change_24h                 # 24小时变化%
+      - change_window              # 时间窗口内变化%
+      - high_low                   # 最高价/最低价
+      - price_target_upper         # 目标上限
+      - price_target_lower         # 目标下限
+      - alert_count                # 报警次数
+      - last_update                # 最后更新时间
+    
+    # 颜色配置
+    colors:
+      price_up: "green"            # 价格上涨颜色
+      price_down: "red"            # 价格下跌颜色
+      alert: "yellow"              # 报警颜色
+      normal: "white"              # 正常颜色
+  # ============================================================================
+  # 监控代币列表 (Symbols)
+  # ============================================================================
+  # 支持现货 (如 BTC/USDT) 和 合约 (如 BTCUSDT)
+  # 建议根据实际关注列表进行增删
+  symbols:
+  
+    # --- 主流币种 ---
+    - symbol: "BTC/USDT"          # 交易对符号
+      enabled: true               # 是否启用监控
+      # 波动率报警: 监控短期内的剧烈波动
+      volatility:
+        enabled: true
+        window: 300           # 时间窗口 (秒)，这里是 5分钟
+        threshold: 2.0        # 阈值 (%)，5分钟内波动超过 2% 报警
+      # 价格目标报警: 到达指定价格触发
+      price_target:
+        enabled: true
+        upper: 90000         # 目标止盈/阻力位     突破此价格报警（0表示不设置）
+        lower: 70000          # 目标止损/支撑位     跌破此价格报警（0表示不设置）
+
+    - symbol: "ETH/USDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 300
+        threshold: 3.0
+      price_target:
+        enabled: true
+        upper: 3000
+        lower: 1500
+
+    - symbol: "SOL/USDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 300
+        threshold: 3.0
+      price_target:
+        enabled: true
+        upper: 200
+        lower: 100
+    
+    - symbol: "BNB/USDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 300
+        threshold: 3.0
+      price_target:
+        enabled: true
+        upper: 900
+        lower: 700
+
+    # --- 稳定币监控 (脱钩预警) ---
+    - symbol: "USDC/USDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 300
+        threshold: 0.5        # 稳定币波动阈值设低一点
+      price_target:
+        enabled: true
+        upper: 1.01
+        lower: 0.99
+
+    # --- 热门/波动大币种 (示例) ---
+    # 比如 HYPE, DOGE 等
+    - symbol: "DOGE/USDT"
+      enabled: true          # 暂时禁用
+      volatility:
+        enabled: true
+        window: 60            # 1分钟窗口
+        threshold: 5.0        # 1分钟波动 5%
+      price_target:
+        enabled: true
+        upper: 0.2
+        lower: 0.1
+
+    # --- 永续合约示例 ---
+    # 格式就是没有/这个符号
+    # 注意：Monitor 脚本需确保 WebSocket 订阅了正确的流 (aggTrade/ticker)
+    - symbol: "BTCUSDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 60
+        threshold: 1.0
+      price_target:
+        enabled: true
+        upper: 90000
+        lower: 70000
+    #xau
+    - symbol: "XAUUSDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 60
+        threshold: 1.0
+      price_target:
+        enabled: true
+        upper: 5100
+        lower: 4800
+    #hype
+    - symbol: "HYPEUSDT"
+      enabled: true
+      volatility:
+        enabled: true
+        window: 60
+        threshold: 1.0
+      price_target:
+        enabled: true
+        upper: 40
+        lower: 30
+  
+  # ============================================================================
+  # 终端显示配置
+  # ============================================================================
+  display:
+    refresh_interval: 1            # 刷新间隔（秒）
+    colors:
+      price_up: "green"            # 价格上涨颜色
+      price_down: "red"            # 价格下跌颜色
+      alert: "yellow"              # 报警颜色
+      normal: "white"              # 正常颜色

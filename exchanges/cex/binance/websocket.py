@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
+from dataclasses import asdict
 
 from cryptotrade.core.adapters.websocket_manager import WebSocketManager
 from cryptotrade.exchanges.cex.binance.base import BinanceBase
@@ -69,10 +70,16 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         self.logger.info(f"🚀 [{self.name}] WebSocket 即将连接到 {self.ws_url}")
         self._tasks.append(asyncio.create_task(self._main_loop()))
 
-    async def subscribe(self, channels: List[str]) -> None:
+    async def subscribe(self, channels: List[str], stream_type: str = "bookTicker") -> None:
         """
         订阅指定的频道 (channels 即 symbol 列表)
+        
+        :param channels: 交易对列表 (如 ['BTCUSDT', 'ETHUSDT'])
+        :param stream_type: 数据流类型，默认 bookTicker，可选 ticker (24h统计)
         """
+        # 记录当前的流类型，供 _send_subscribe 使用
+        self._current_stream_type = stream_type
+        
         for s in channels:
             if s not in self.symbols:
                 self.symbols.append(s)
@@ -182,8 +189,9 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         if not self._ws or not self.symbols:
             return
         
-        # 使用 BinanceBase.BinanceStreamType 提供的常量
-        stream_type = self.BinanceStreamType.TICKER
+        # 使用传入的流类型，或默认 bookTicker
+        stream_type = getattr(self, "_current_stream_type", self.BinanceStreamType.BOOK_TICKER)
+        
         params = [
             f"{self.normalize_symbol(s).lower()}@{stream_type}" for s in self.symbols
         ]
@@ -193,22 +201,50 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
             "id": int(time.time() * 1000),
         }
         await self._ws.send(json.dumps(payload))
-        self.logger.info(f"📡 已发送订阅请求: {params}")
+        self.logger.info(f"📡 已发送订阅请求: {params} (ID: {payload['id']})")
 
     async def _handle_message(self, message: str) -> None:
         """
         处理 WebSocket 原始消息
         - 解析 JSON
-        - 提取 bookTicker 数据 (bid/ask)
+        - 提取数据 (bookTicker 或 24hTicker)
         - 构造 TickerData 对象
         - 调用基类 _emit 广播
         """
         try:
             data = json.loads(message)
+            
+            # 忽略订阅响应 {"result": null, "id": 123}
             if "result" in data and data["result"] is None:
                 return
+                
+            # 处理 24hrTicker (事件名: "24hrTicker")
+            if "e" in data and data["e"] == "24hrTicker":
+                symbol_raw = data["s"].upper()
+                target_symbol = self.symbol_map.get(symbol_raw)
+                if not target_symbol:
+                    return
+                
+                ticker = TickerData(
+                    symbol=target_symbol,
+                    timestamp=datetime.now(),
+                    exchange=self.name,
+                    last=Decimal(str(data["c"])),   # 最新价
+                    open=Decimal(str(data["o"])),   # 开盘价
+                    high=Decimal(str(data["h"])),   # 最高价
+                    low=Decimal(str(data["l"])),    # 最低价
+                    change=Decimal(str(data["p"])), # 涨跌额
+                    percentage=Decimal(str(data["P"])), # 涨跌幅 %
+                    volume=Decimal(str(data["v"])), # 成交量
+                    quote_volume=Decimal(str(data["q"])), # 成交额
+                    raw_data=data
+                )
+                await self._emit(asdict(ticker))
+                return
+
+            # 处理 bookTicker (无事件名，特征字段: b, a, s)
             if "b" in data and "a" in data and "s" in data:
-                symbol_raw = data["s"].lower()
+                symbol_raw = data["s"].upper()
                 target_symbol = self.symbol_map.get(symbol_raw)
                 if not target_symbol:
                     return
@@ -221,9 +257,12 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
                     ask=Decimal(str(data["a"])),
                     bid_size=Decimal(str(data["B"])),
                     ask_size=Decimal(str(data["A"])),
+                    # bookTicker 没有 last/change 等字段，只能提供盘口
                     raw_data=data
                 )
-                await self._emit(ticker)
+                await self._emit(asdict(ticker))
+                return
+                
         except Exception as e:
             self.logger.error(f"消息处理错误: {e}")
 
