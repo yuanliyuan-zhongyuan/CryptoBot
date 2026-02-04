@@ -8,11 +8,12 @@
 
 ## 🚀 核心特性
 
-- **实时数据流**：基于 `websockets` 实现的高性能异步行情接入。
+- **终端交互面板**：基于 `Textual/Rich` 构建的现代化 TUI (Terminal UI)，提供实时行情看板与策略状态监控。
+- **实时数据流**：基于 `websockets` 实现的高性能异步行情接入，支持多流并发。
 - **智能节点优选**：自动检测并选择延迟最低的交易所 WebSocket 节点。
 - **多市场并行**：支持同时连接 Binance Spot（现货）和 Binance USDM（U本位合约）。
 - **REST API 集成**：内置 `aiohttp` 异步客户端，支持账户查询、挂单管理及历史数据获取。
-- **可扩展架构**：通过 `pyproject.toml` 管理依赖，支持模块化扩展。
+- **可扩展架构**：基于 `pyproject.toml` 的现代化包管理，模块化拆分策略、驱动与核心服务。
 
 ---
 
@@ -27,22 +28,29 @@ python --version
 ```
 
 ### 2. 安装项目与依赖
-本项目使用 `pyproject.toml` 管理依赖。请在项目根目录执行以下命令，将项目以**可编辑模式（Editable Mode）**安装，并启用异步支持：
+本项目使用 `pyproject.toml` 管理依赖。请在项目根目录执行以下命令，将项目以**可编辑模式（Editable Mode）**安装，并启用异步与 CLI 支持：
 
 ```powershell
-# 安装核心及异步依赖（注意后面的中括号）
-pip install -e .[async]
+# 安装核心、异步及 CLI 界面依赖
+pip install -e .[async,cli]
 ```
 
 > **说明**：
 > - `-e` 模式意味着你修改本地代码后，无需重新安装即可生效。
-> - `[async]` 选项会自动安装 `websockets`、`aiohttp` 等异步网络库。
-> - 安装完成后，系统会自动注册 `cryptotrade-run` 和 `cryptotrade-rest` 命令行工具。
+> - `[async,cli]` 选项会自动安装 `websockets`、`aiohttp` (异步) 以及 `rich` (终端界面)。
+> - 安装完成后，系统会自动注册 `cryptotrade-run`、`cryptotrade-rest` 和 `cryptotrade-monitor` 命令行工具。
 
 ### 3. 运行演示
 
-#### 方式 A：实时行情监控 (WebSocket)
-直接在终端输入以下命令启动策略协调器：
+#### 方式 A: 实时行情看板 (Monitor)
+启动全屏终端监控面板，实时查看多币种行情与波动率：
+
+```powershell
+cryptotrade-monitor
+```
+
+#### 方式 B：策略运行 (Strategy Run)
+直接在终端输入以下命令启动策略协调器（带日志流）：
 
 ```powershell
 cryptotrade-run
@@ -71,6 +79,37 @@ INFO -    - USDT (Futures): 可用=16.2444, 冻结=11.6328
 
 ---
 
+## 🔍 实时监控与数据流配置
+
+为了满足不同的监控需求（如高频套利 vs 趋势看板），系统支持多种 WebSocket 数据流模式。
+
+### 支持的流类型 (`stream_type`)
+基于 `BinanceStreamType` 常量定义：
+- **`bookTicker`** (默认): 仅推送最优买卖价 (Best Bid/Ask)。数据量极小，延迟最低，适合**高频网格**。
+- **`ticker`** (即 `TICKER_24H`): 推送 24小时统计数据（最新价、涨跌幅、成交量）。适合**行情仪表盘**。
+- **`trade`**: 实时成交流。
+- **`userData`**: 账户订单与余额变动更新。
+
+### 开发调用示例
+在编写自定义监控脚本时，可通过 `stream_type` 参数灵活切换：
+
+```python
+from cryptotrade.exchanges.cex.binance.base import BinanceBase
+
+# 场景 A: 高频策略 (默认)
+# 获取 bid/ask 价格，毫秒级响应
+await ws_client.subscribe(["BTCUSDT"])
+
+# 场景 B: 市场趋势监控
+# 获取 24小时涨跌幅、成交量等统计数据
+await ws_client.subscribe(
+    ["BTCUSDT", "ETHUSDT"], 
+    stream_type=BinanceBase.BinanceStreamType.TICKER_24H
+)
+```
+
+---
+
 ## ⚙️ 进阶用法
 
 ### 真实交易 vs 模拟回测
@@ -89,7 +128,7 @@ INFO -    - USDT (Futures): 可用=16.2444, 冻结=11.6328
 `cryptotrade-run` 支持多种参数：
 - `--cex-dir`: CEX 交易所配置目录（默认：`config/exchanges/cex`）
 - `--strategy`: 策略配置文件路径（默认：`config/strategies/grid/basic_grid.yaml`）
-- `--duration`: 运行时长（秒），例如 `--duration 60`
+- `--duration`: 运行时长（秒），例如 `--duration 60`。设为 `-1` 则无限运行（适合监控模式）。
 
 ---
 
@@ -98,7 +137,10 @@ INFO -    - USDT (Futures): 可用=16.2444, 冻结=11.6328
 ```text
 d:\CryptoTrade\
 ├── config/                     # 配置文件（无需代码修改，直接配置 YAML）
-│   ├── exchanges/              # 交易所连接参数 (Binance/OKX 等)
+│   ├── alert/                  # 告警与通知配置
+│   ├── exchanges/              # 交易所连接参数
+│   │   ├── cex/                # CEX 配置 (Binance, OKX, Backpack)
+│   │   └── dex/                # DEX 配置 (Hyperliquid, dYdX 等)
 │   ├── strategies/             # 策略参数 (网格间距/套利阈值等)
 │   └── risk/                   # 全局风控参数
 ├── core/                       # 核心架构层（系统骨架）
@@ -106,18 +148,22 @@ d:\CryptoTrade\
 │   │   ├── websocket_manager.py    # WebSocket 通用基类
 │   │   ├── binance_adapter.py      # Binance 业务适配 (混合 WS/REST)
 │   │   └── models.py               # 统一数据模型 (Ticker/Order/Position)
-│   └── coordinators/           # 业务协调层
-│       └── trading_coordinator.py  # 系统大脑：分发行情、调度策略
+│   ├── coordinators/           # 业务协调层
+│   │   └── trading_coordinator.py  # 系统大脑：分发行情、调度策略
+│   └── services/               # 通用基础服务
+│       └── monitor.py              # 监控服务模块
 ├── exchanges/                  # 交易所底层驱动层
 │   ├── cex/
-│   │   └── binance/
-│   │       ├── websocket.py    # Binance 真实 WebSocket 客户端
-│   │       ├── rest.py         # Binance REST API 客户端
-│   │       └── base.py         # 基础常量与配置
+│   │   └── binance/            # Binance 驱动 (REST/WS/Base)
+│   ├── dex/                    # DEX 驱动预留目录
 │   └── mock/                   # 模拟交易所 (用于回测/调试)
+├── strategies/                 # 策略逻辑实现层
+│   ├── grid/                   # 网格策略 (Engine/Runner)
+│   └── arbitrage/              # 套利策略 (Engine/Runner)
 ├── pyproject.toml              # 项目依赖与构建配置
 ├── run.py                      # 策略运行入口 (cryptotrade-run)
 ├── run_rest.py                 # REST 测试入口 (cryptotrade-rest)
+├── run_monitor.py              # 监控看板入口
 └── README.md                   # 项目说明书
 ```
 
