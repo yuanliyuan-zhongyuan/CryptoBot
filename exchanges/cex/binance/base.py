@@ -26,6 +26,7 @@ class BinanceRestEndpoint(str, Enum):
     # 🌐 Public Data (公共数据)
     EXCHANGE_INFO = "/api/v3/exchangeInfo"
     TICKER_BOOK = "/api/v3/ticker/bookTicker"
+    TICKER_24HR = "/api/v3/ticker/24hr"  # 📈 24hr Ticker Price Change Statistics
     DEPTH = "/api/v3/depth"
     KLINES = "/api/v3/klines"
     SERVER_TIME = "/api/v3/time"
@@ -36,6 +37,8 @@ class BinanceRestEndpoint(str, Enum):
     OPEN_ORDERS = "/api/v3/openOrders"
 
     # 📈 Futures Account & Trade (合约账户与交易)
+    FUTURES_EXCHANGE_INFO = "/fapi/v1/exchangeInfo" # ℹ️ 合约交易对信息
+    FUTURES_TICKER_24HR = "/fapi/v1/ticker/24hr"    # 📈 合约24hr Ticker
     FUTURES_ACCOUNT = "/fapi/v2/account"        # 💰 U本位合约账户信息
     FUTURES_ORDER = "/fapi/v1/order"            # 📝 合约下单/撤单
     FUTURES_OPEN_ORDERS = "/fapi/v1/openOrders" # 📋 合约普通挂单
@@ -79,8 +82,7 @@ class BinanceBase:
         OrderType.LIMIT: 'LIMIT'
     }
 
-    # 📡 WebSocket 订阅类型常量 
-    # 因为需要监控，所以添加了一些流
+    # 📡 WebSocket 订阅类型常量
     class BinanceStreamType(str, Enum):
         """WebSocket 数据流类型"""
         BOOK_TICKER = "bookTicker"  # 📊 最优买卖价 (原 TICKER)

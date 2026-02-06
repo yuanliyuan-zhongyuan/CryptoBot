@@ -38,7 +38,7 @@ pip install -e .[async,cli]
 > **说明**：
 > - `-e` 模式意味着你修改本地代码后，无需重新安装即可生效。
 > - `[async,cli]` 选项会自动安装 `websockets`、`aiohttp` (异步) 以及 `rich` (终端界面)。
-> - 安装完成后，系统会自动注册 `cryptotrade-run`、`cryptotrade-rest` 和 `cryptotrade-monitor` 命令行工具。
+> - 安装完成后，系统会自动注册 `cryptotrade-run`、`cryptotrade-rest`、`cryptotrade-monitor` 和 `cryptotrade-scanner` 命令行工具。
 
 ### 3. 运行演示
 
@@ -49,7 +49,14 @@ pip install -e .[async,cli]
 cryptotrade-monitor
 ```
 
-#### 方式 B：策略运行 (Strategy Run)
+#### 方式 B: 全市场雷达扫描 (Scanner)
+启动全币种雷达，自动发现高波动与大成交量机会（Spot/Futures 双轨扫描）：
+
+```powershell
+cryptotrade-scanner
+```
+
+#### 方式 C：策略运行 (Strategy Run)
 直接在终端输入以下命令启动策略协调器（带日志流）：
 
 ```powershell
@@ -138,6 +145,7 @@ await ws_client.subscribe(
 d:\CryptoTrade\
 ├── config/                     # 配置文件（无需代码修改，直接配置 YAML）
 │   ├── alert/                  # 告警与通知配置
+│   ├── scanner/                # 扫描器配置 (Binance Scanner)
 │   ├── exchanges/              # 交易所连接参数
 │   │   ├── cex/                # CEX 配置 (Binance, OKX, Backpack)
 │   │   └── dex/                # DEX 配置 (Hyperliquid, dYdX 等)
@@ -146,12 +154,14 @@ d:\CryptoTrade\
 ├── core/                       # 核心架构层（系统骨架）
 │   ├── adapters/               # 协议适配层：抹平不同交易所差异
 │   │   ├── websocket_manager.py    # WebSocket 通用基类
+│   │   ├── subscription_manager.py # 订阅管理器 (管理动态订阅)
 │   │   ├── binance_adapter.py      # Binance 业务适配 (混合 WS/REST)
 │   │   └── models.py               # 统一数据模型 (Ticker/Order/Position)
 │   ├── coordinators/           # 业务协调层
 │   │   └── trading_coordinator.py  # 系统大脑：分发行情、调度策略
 │   └── services/               # 通用基础服务
-│       └── monitor.py              # 监控服务模块
+│       ├── monitor.py              # 监控服务模块 (Monitor)
+│       └── scanner.py              # 雷达扫描模块 (Scanner)
 ├── exchanges/                  # 交易所底层驱动层
 │   ├── cex/
 │   │   └── binance/            # Binance 驱动 (REST/WS/Base)
@@ -163,7 +173,8 @@ d:\CryptoTrade\
 ├── pyproject.toml              # 项目依赖与构建配置
 ├── run.py                      # 策略运行入口 (cryptotrade-run)
 ├── run_rest.py                 # REST 测试入口 (cryptotrade-rest)
-├── run_monitor.py              # 监控看板入口
+├── run_monitor.py              # 监控看板入口 (cryptotrade-monitor)
+├── run_scanner.py              # 雷达扫描入口 (cryptotrade-scanner)
 └── README.md                   # 项目说明书
 ```
 

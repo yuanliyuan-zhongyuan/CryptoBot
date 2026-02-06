@@ -170,7 +170,7 @@ class BinanceRest(BinanceBase):
         包含所有交易对的规则、精度等信息。
         """
         return await self._request("GET", BinanceRestEndpoint.EXCHANGE_INFO)
-        
+
     async def get_futures_exchange_info(self) -> Dict:
         """
         ℹ️ 获取合约交易所信息 (U本位)
@@ -208,6 +208,37 @@ class BinanceRest(BinanceBase):
             ask_size=Decimal(str(data.get("askQty"))),
             raw_data=data
         )
+
+    async def get_ticker_24hr(self, symbol: str = None) -> Any:
+        """
+        📈 获取 24小时价格变动统计 (Spot)
+        
+        :param symbol: 交易对符号 (可选，不传则返回所有)
+        :return: 字典或字典列表
+        """
+        params = {}
+        if symbol:
+            params["symbol"] = self.normalize_symbol(symbol)
+            
+        return await self._request("GET", BinanceRestEndpoint.TICKER_24HR, params)
+
+    async def get_futures_ticker_24hr(self, symbol: str = None) -> Any:
+        """
+        📈 获取合约 24小时价格变动统计 (Futures)
+        
+        :param symbol: 交易对符号 (可选，不传则返回所有)
+        :return: 字典或字典列表
+        """
+        original_base_url = self.base_url
+        self.base_url = self.futures_base_url
+        try:
+            params = {}
+            if symbol:
+                params["symbol"] = self.normalize_symbol(symbol)
+                
+            return await self._request("GET", BinanceRestEndpoint.FUTURES_TICKER_24HR, params)
+        finally:
+            self.base_url = original_base_url
 
     async def get_tickers(self) -> List[Dict]:
         """

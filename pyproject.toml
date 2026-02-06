@@ -36,7 +36,7 @@ dependencies = [
 cryptotrade-run = "cryptotrade.run:cli"
 cryptotrade-rest = "cryptotrade.run_rest:cli"
 cryptotrade-monitor = "cryptotrade.run_monitor:cli"
-
+cryptotrade-scanner = "cryptotrade.run_scanner:cli"
 #
 # ────────────────────────────────────────────────────────────────────────────
 # 可选依赖分组（Extras）

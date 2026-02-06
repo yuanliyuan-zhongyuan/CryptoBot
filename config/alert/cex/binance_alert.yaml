@@ -60,7 +60,7 @@ binance_alert:
       price_target:
         enabled: true
         upper: 90000         # 目标止盈/阻力位     突破此价格报警（0表示不设置）
-        lower: 70000          # 目标止损/支撑位     跌破此价格报警（0表示不设置）
+        lower: 60000          # 目标止损/支撑位     跌破此价格报警（0表示不设置）
 
     - symbol: "ETH/USDT"
       enabled: true
@@ -81,8 +81,8 @@ binance_alert:
         threshold: 3.0
       price_target:
         enabled: true
-        upper: 200
-        lower: 100
+        upper: 100
+        lower: 60
     
     - symbol: "BNB/USDT"
       enabled: true
