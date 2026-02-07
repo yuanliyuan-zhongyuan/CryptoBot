@@ -312,12 +312,16 @@ async def main():
 
     try:
         # 5️⃣ 启动连接
-        # 异步启动所有 WS 连接
+        # 异步启动所有 WS 连接 (并行连接以提高启动速度)
         console.print("[bold yellow]正在连接 WebSocket...[/]")
-        for ws in ws_clients:
-            await ws.connect()
-            # 订阅 Ticker 数据流 (这是最轻量级的实时价格流)
-            await ws.subscribe(ws.symbols, stream_type="ticker")
+        
+        # 并行连接
+        connect_tasks = [ws.connect() for ws in ws_clients]
+        await asyncio.gather(*connect_tasks)
+        
+        # 并行订阅
+        subscribe_tasks = [ws.subscribe(ws.symbols, stream_type="ticker") for ws in ws_clients]
+        await asyncio.gather(*subscribe_tasks)
             
         console.print("[bold green]✅ 连接成功！启动实时界面...[/]")
         await asyncio.sleep(2) # ⏳ 等待 2秒 让数据预热，避免表格显示为空

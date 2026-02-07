@@ -1,17 +1,36 @@
 """
-📡 雷达扫描服务 (Scanner Service)
-==============================
+==============================================================================
+📡  雷达扫描服务 (Scanner Service)
+==============================================================================
 
-此模块实现了全市场扫描功能 (雷达模式)。
-它负责定期轮询交易所 REST API，筛选出符合条件的交易对。
+🎯 模块作用
+- 🚀 全市场扫描: 定期轮询交易所 REST API，获取所有交易对的 24h 行情
+- 🧹 智能过滤: 剔除稳定币互换、低流动性僵尸币、风控黑名单币种
+- 📊 排序优选: 按涨跌幅、成交量等指标打分，选出 Top N 热门标的
+- 🔄 动态发现: 将发现的新机会推送给 SubscriptionManager，实现自动订阅
 
-📌 主要功能:
-    1. 🔍 全市场扫描: 获取所有交易对的 24小时行情
-    2. 🧹 过滤筛选: 剔除稳定币、低流动性币种
-    3. 📊 排序排名: 按涨跌幅、成交量等指标排序
-    4. 📤 结果输出: 生成标准化扫描结果，供 SubscriptionManager 使用
+🔌 使用场景
+- 作为"全域雷达"，弥补 Monitor 定点监控的盲区
+- 与 SubscriptionManager 联动，实现「发现 ➜ 订阅 ➜ 追踪」的自动化闭环
+- 适合发现突发热点、异动币种
 
-这一层是纯粹的数据发现层，不涉及具体交易策略。
+� 输入 / �📤 输出
+- 输入: Binance REST API (24hr Ticker)
+- 输出: List[ScanResult] (标准化扫描结果列表)
+
+🧭 运行流程 (Scanner Mode)
+1) 定时器触发 (如每 60s)
+2) 调用 API 拉取 2000+ 币种行情
+3) 应用 Filter 规则 (计价币、黑名单、成交额阈值)
+4) 计算 Score 并排序 (Top 10)
+5) 更新 last_results 供 UI 展示或下游消费
+
+🗂️ 配置速查 (binance_scanner.yaml)
+- scan.interval: 扫描间隔 (秒)
+- scan.limit: 返回结果数量 (Top N)
+- markets.spot/futures: 市场开关与最小成交额门槛 (min_volume)
+- filters.excluded_coins: 排除的币种 (如 USDC, BUSD)
+==============================================================================
 """
 
 import asyncio
@@ -26,11 +45,23 @@ logger = logging.getLogger("Core.Scanner")
 
 @dataclass
 class ScanResult:
-    """单次扫描结果项"""
+    """
+    📦 单次扫描结果项 (Value Object)
+    
+    用于封装单个币种的扫描结果，包含价格、涨跌幅、成交量等关键指标。
+    提供 __str__ 方法以便于日志打印。
+    
+    🔑 字段说明
+    - symbol: 交易对名称 (e.g. BTCUSDT)
+    - price: 当前价格
+    - change_24h: 24小时涨跌幅 (%)
+    - volume_24h: 24小时成交额 (注意是 Quote Volume，单位通常是 USDT)
+    - score: 综合评分 (目前主要基于涨跌幅绝对值，用于排序)
+    """
     symbol: str
     price: Decimal
     change_24h: Decimal      # 24小时涨跌幅 (%)
-    volume_24h: Decimal      # 24小时成交量 (USDT)
+    volume_24h: Decimal      # 24小时成交额 (USDT)
     high_24h: Decimal
     low_24h: Decimal
     score: float = 0.0       # 综合评分 (用于排序)
@@ -41,10 +72,22 @@ class ScanResult:
 
 class ScannerService:
     """
-    雷达扫描服务
+    🧠 雷达扫描服务 (Service Layer)
+    - 负责执行具体的扫描逻辑：获取数据 -> 过滤 -> 排序
+    - 纯粹的数据发现层，不涉及具体的交易执行
+    
+    核心方法:
+    - scan_spot(): 扫描现货市场
+    - scan_futures(): 扫描合约市场
+    - update_config(): 热更新配置
     """
     
     def __init__(self, client: BinanceRest, config: Dict = None):
+        """
+        🚀 初始化
+        :param client: Binance REST API 客户端 (用于拉取全量行情)
+        :param config: 扫描配置字典
+        """
         self.client = client
         self.config = config or {}
         self.last_results: List[ScanResult] = []
@@ -53,14 +96,20 @@ class ScannerService:
 
     def update_config(self, config: Dict):
         """
-        🔄 动态更新配置
+        🔄 热更新配置
+        - 允许在运行时调整过滤规则、成交额门槛等
+        - 由外部 (如 run_scanner.py) 定期读取配置文件并调用
         """
         self.config = config
         self._parse_config()
         logger.info("✅ Scanner 配置已动态更新")
 
     def _parse_config(self):
-        """解析配置到本地属性"""
+        """
+        ⚙️ 解析配置到本地属性
+        - 将复杂的嵌套字典配置解析为扁平的本地属性，提高后续读取效率
+        - 处理默认值回退逻辑
+        """
         # 兼容旧配置 (直接在 root) 和新配置 (nested in markets/filters)
         
         # 1. 过滤配置
@@ -88,7 +137,14 @@ class ScannerService:
         🛰️ 扫描 现货市场 (Spot)
         
         :param limit: 返回结果数量 (Top N)
-        :return: 扫描结果列表
+        :return: 经过过滤和排序的 ScanResult 列表
+        
+        流程:
+        1. client.get_ticker_24hr() -> 获取全量数据
+        2. Filter: 计价币 (Quote Asset) 检查
+        3. Filter: 基础币 (Base Asset) 黑名单检查
+        4. Filter: 最小成交额 (Min Volume) 检查
+        5. Sort: 按波动率 (Score) 降序排列
         """
         logger.info("📡 雷达启动: 正在扫描现货市场行情...")
         
@@ -169,10 +225,12 @@ class ScannerService:
 
     async def scan_futures(self, limit: int = 10) -> List[ScanResult]:
         """
-        🛰️ 扫描 U本位合约市场
+        🛰️ 扫描 U本位合约市场 (Futures)
         
         :param limit: 返回结果数量 (Top N)
-        :return: 扫描结果列表
+        :return: 经过过滤和排序的 ScanResult 列表
+        
+        逻辑与 scan_spot 类似，但使用合约 API 和独立的成交额门槛。
         """
         logger.info("📡 雷达启动: 正在扫描全市场行情...")
         

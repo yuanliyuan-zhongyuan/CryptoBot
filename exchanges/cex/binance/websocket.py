@@ -2,8 +2,9 @@ import asyncio
 import json
 import ssl
 import time
+import aiohttp
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 from dataclasses import asdict
 
@@ -19,11 +20,15 @@ except ImportError:
 
 class BinanceWebSocket(WebSocketManager, BinanceBase):
     """
-    Binance 专用 WebSocket 客户端
+    Binance 专用 WebSocket 客户端 (双模版：支持 aiohttp 和 websockets)
     
     继承体系：
     - WebSocketManager: 提供连接管理、回调分发等通用 WebSocket 能力
     - BinanceBase: 提供 Binance 特有的配置解析、符号转换等基础能力
+    
+    兼容性设计：
+    - 模式 1 (aiohttp): 当配置了 HTTP 代理 (proxy) 时自动启用。aiohttp 原生支持 HTTP 代理。
+    - 模式 2 (websockets): 当未配置代理且安装了 websockets 库时启用。这是高性能的原生 WebSocket 实现。
     
     作用：
     - 根据配置中现货 / U 本位开关，自动选择合适的 WebSocket 节点
@@ -39,9 +44,6 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         # 初始化两个父类
         WebSocketManager.__init__(self, name=name)
         BinanceBase.__init__(self, config=config)
-        
-        if websockets is None:
-            raise ImportError("缺少 websockets 库，无法连接 Binance WebSocket，请先安装依赖")
             
         self.symbols = symbols or []
         # 注意：self.config 已经在 BinanceBase.__init__ 中设置
@@ -49,6 +51,7 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         self._tasks: List[asyncio.Task] = []
         self._ws = None
         self._running = False
+        self.session: Optional[aiohttp.ClientSession] = None
         
         # 覆盖 BinanceBase 的 ws_url (因为这里需要动态测速选择)
         self.ws_url: Optional[str] = None
@@ -59,6 +62,22 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
             norm = self.normalize_symbol(s)
             self.symbol_map[norm] = s
 
+        # 智能选择后端
+        # 1. 如果有代理 -> 强制使用 aiohttp (因为 websockets 代理支持较弱)
+        # 2. 如果无代理且有 websockets 库 -> 使用 websockets (高性能)
+        # 3. 否则 -> 使用 aiohttp (通用兜底)
+        self.proxy_url = self.config.get("api", {}).get("proxy")
+        
+        if self.proxy_url:
+            self.use_backend = "aiohttp"
+            self.logger.info(f"🌐 检测到代理配置 {self.proxy_url}，自动切换至 aiohttp WebSocket 后端")
+        elif websockets is not None:
+            self.use_backend = "websockets"
+            self.logger.info("⚡ 未检测到代理且 websockets 库可用，使用高性能 websockets 后端")
+        else:
+            self.use_backend = "aiohttp"
+            self.logger.warning("⚠️ 未检测到 websockets 库，回退至 aiohttp WebSocket 后端")
+
     async def connect(self) -> None:
         """
         连接 WebSocket 并启动主循环
@@ -66,8 +85,12 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         if self._running:
             return
         self._running = True
+        
+        if self.use_backend == "aiohttp" and not self.session:
+            self.session = aiohttp.ClientSession()
+
         await self._select_best_ws_url()
-        self.logger.info(f"🚀 [{self.name}] WebSocket 即将连接到 {self.ws_url}")
+        self.logger.info(f"🚀 [{self.name}] WebSocket ({self.use_backend}) 即将连接到 {self.ws_url}")
         self._tasks.append(asyncio.create_task(self._main_loop()))
 
     async def subscribe(self, channels: List[str], stream_type: str = "bookTicker") -> None:
@@ -95,12 +118,26 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         if not self._running:
             return
         self._running = False
+        
+        # 关闭 WebSocket 连接
         if self._ws:
             try:
-                await self._ws.close()
+                if self.use_backend == "aiohttp":
+                    await self._ws.close()
+                elif self.use_backend == "websockets":
+                    await self._ws.close()
             except Exception:
                 pass
             self._ws = None
+            
+        # 关闭 aiohttp session
+        if self.session:
+            try:
+                await self.session.close()
+            except Exception:
+                pass
+            self.session = None
+
         for t in self._tasks:
             t.cancel()
         self._tasks = []
@@ -108,11 +145,7 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
 
     async def _select_best_ws_url(self) -> None:
         """
-        根据配置自动选择延迟最低的 WebSocket 节点
-        - 读取配置文件中的 URL 列表
-        - 区分现货 (Spot) 与 U 本位合约 (USD-M Futures)
-        - 区分主网 (Mainnet) 与测试网 (Testnet)
-        - 对每个节点进行连接测速
+        根据配置自动选择延迟最低的 WebSocket 节点 (并发测速)
         """
         api_conf = self.config.get("api", {})
         markets_conf = self.config.get("markets", {})
@@ -129,26 +162,64 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
             else:
                 urls = api_conf.get("ws_base_urls", [])
         if not urls:
-            self.logger.error("未找到任何 Binance WebSocket 配置 URL，请检查 binance.yaml 中 api.ws_base_urls 等字段")
+            self.logger.error("未找到任何 Binance WebSocket 配置 URL")
             return
-        best_url = None
-        min_latency = float("inf")
-        self.logger.info(f"🔍 [{self.name}] 正在自动优选最佳 WebSocket 节点...")
-        for base_url in urls:
-            target = base_url
+        
+        self.logger.info(f"🔍 [{self.name}] 正在并发优选最佳 WebSocket 节点...")
+        
+        # 确保 session 存在 (如果是 aiohttp 模式)
+        if self.use_backend == "aiohttp" and not self.session:
+            self.session = aiohttp.ClientSession()
+
+        # 定义单次测速函数
+        async def check_url(url: str) -> Tuple[str, float]:
+            target = url
             if not target.endswith("/ws") and not target.endswith("/stream"):
                 target += "/ws"
+            
             try:
                 start_t = time.monotonic()
-                async with websockets.connect(target, close_timeout=1, open_timeout=2) as ws:
-                    _ = ws
-                    latency = (time.monotonic() - start_t) * 1000
-                    self.logger.info(f"  - 节点 {base_url} 延迟: {latency:.2f}ms")
-                    if latency < min_latency:
-                        min_latency = latency
-                        best_url = target
+                if self.use_backend == "aiohttp":
+                    # 模式 1: aiohttp + Proxy
+                    async with self.session.ws_connect(
+                        target, 
+                        proxy=self.proxy_url,
+                        heartbeat=10,
+                        ssl=False if self.proxy_url else None,
+                        timeout=3.0 # 测速超时 3秒
+                    ) as ws:
+                        pass
+                else:
+                    # 模式 2: websockets (无代理)
+                    async with websockets.connect(
+                        target, 
+                        close_timeout=1, 
+                        open_timeout=3 # 测速超时 3秒
+                    ) as ws:
+                        pass
+                
+                latency = (time.monotonic() - start_t) * 1000
+                return (target, latency)
             except Exception as e:
-                self.logger.warning(f"  - 节点 {base_url} 连接失败: {e}")
+                # self.logger.debug(f"节点 {target} 连接失败: {e}")
+                return (target, float("inf"))
+
+        # 并发执行测速
+        tasks = [check_url(url) for url in urls]
+        results = await asyncio.gather(*tasks)
+
+        best_url = None
+        min_latency = float("inf")
+
+        for target, latency in results:
+            if latency < float("inf"):
+                self.logger.info(f"  - 节点 {target} 延迟: {latency:.2f}ms")
+                if latency < min_latency:
+                    min_latency = latency
+                    best_url = target
+            else:
+                self.logger.warning(f"  - 节点 {target} 连接超时或失败")
+
         if best_url:
             self.ws_url = best_url
             self.logger.info(f"✅ 选中最佳节点: {self.ws_url} (延迟 {min_latency:.2f}ms)")
@@ -157,25 +228,54 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
 
     async def _main_loop(self) -> None:
         """
-        WebSocket 主循环
-        - 建立连接
-        - 发送订阅
-        - 持续接收消息
-        - 异常自动重连
+        WebSocket 主循环 (双模式)
         """
         while self._running:
             try:
                 if not self.ws_url:
-                    self.logger.error("未配置有效的 Binance WebSocket URL，无法建立连接")
-                    return
-                async with websockets.connect(self.ws_url) as ws:
-                    self._ws = ws
-                    self.logger.info(f"✅ [{self.name}] WebSocket 连接成功")
-                    await self._send_subscribe()
-                    async for message in ws:
-                        if not self._running:
-                            break
-                        await self._handle_message(message)
+                    await asyncio.sleep(1)
+                    continue
+
+                if self.use_backend == "aiohttp":
+                    # === 模式 1: aiohttp 实现 ===
+                    if not self.session:
+                        self.session = aiohttp.ClientSession()
+
+                    async with self.session.ws_connect(
+                        self.ws_url, 
+                        proxy=self.proxy_url,
+                        heartbeat=20,
+                        autoping=True
+                    ) as ws:
+                        self._ws = ws
+                        self.logger.info(f"✅ [{self.name}] WebSocket (aiohttp) 已连接")
+                        await self._send_subscribe()
+                        
+                        async for msg in ws:
+                            if not self._running:
+                                break
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await self._handle_message(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.ERROR:
+                                break
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                break
+                else:
+                    # === 模式 2: websockets 实现 ===
+                    connect_kwargs = {
+                        "ping_interval": 20,
+                        "ping_timeout": 20,
+                        "close_timeout": 5
+                    }
+                    async with websockets.connect(self.ws_url, **connect_kwargs) as ws:
+                        self._ws = ws
+                        self.logger.info(f"✅ [{self.name}] WebSocket (websockets) 已连接")
+                        await self._send_subscribe()
+                        async for message in ws:
+                            if not self._running:
+                                break
+                            await self._handle_message(message)
+                            
             except Exception as e:
                 self.logger.error(f"❌ [{self.name}] WebSocket 出错或断开: {e}")
                 if self._running:
@@ -200,8 +300,16 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
             "params": params,
             "id": int(time.time() * 1000),
         }
-        await self._ws.send(json.dumps(payload))
-        self.logger.info(f"📡 已发送订阅请求: {params} (ID: {payload['id']})")
+        
+        try:
+            msg = json.dumps(payload)
+            if self.use_backend == "aiohttp":
+                await self._ws.send_str(msg)
+            else:
+                await self._ws.send(msg)
+            self.logger.info(f"📡 已发送订阅请求: {params} (ID: {payload['id']})")
+        except Exception as e:
+            self.logger.error(f"❌ 发送订阅失败: {e}")
 
     async def _handle_message(self, message: str) -> None:
         """

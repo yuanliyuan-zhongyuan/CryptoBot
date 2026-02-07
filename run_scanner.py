@@ -1,16 +1,36 @@
 """
-CryptoTrade 学习项目 - 全币种扫描器入口
-=======================================
+==============================================================================
+🚀  雷达扫描器启动脚本 (Scanner Entry Point)
+==============================================================================
 
-功能：
-- 🚀 启动 REST 客户端和订阅管理器
-- ⚙️ 读取配置文件，识别已启用的市场 (现货/合约)
-- 🔍 自动扫描所有处于交易状态的币种 (Full Market Scan)
-- 📊 使用 Rich Live 持续刷新展示结果 (现货 & 合约双表)
-- 📝 演示 "配置 -> 发现 -> 订阅" 的完整流程
+🎯 模块作用
+- 作为雷达扫描服务的独立入口，提供可视化的实时行情看板
+- 演示 "配置 -> 发现 -> 订阅" 的完整工作流
+- 负责初始化 REST 客户端、加载配置、驱动扫描循环、渲染 UI
 
-使用方法：
-    python -m cryptotrade.run_scanner
+🔌 使用场景
+- 开发调试: 观察 ScannerService 的筛选逻辑是否符合预期
+- 实盘辅助: 作为一个独立的行情监控大屏，挂在副屏上实时寻找机会
+- 策略验证: 验证 binance_scanner.yaml 配置文件的效果
+
+📥 输入 / 📤 输出
+- 输入: 配置文件 (binance.yaml, binance_scanner.yaml)
+- 输出: 终端实时刷新界面 (Rich UI)，展示现货/合约 Top N 榜单
+
+🧭 运行流程
+1. 加载配置 (Binance API & Scanner 策略)
+2. 初始化 BinanceRest 客户端 (连接性检查)
+3. 启动 Rich Live 界面上下文
+4. 进入主循环 (While True):
+   - ⏳ 检查热更新: 是否有新的配置变更
+   - 📡 执行扫描: 并行调用 scan_spot / scan_futures
+   - 📊 渲染 UI: 更新现货/合约双榜单
+   - 💤 等待: 智能休眠，防止 API 限频
+   
+🗂️ 配置速查
+- 启动命令: python -m cryptotrade.run_scanner
+- 配置文件: config/scanner/cex/binance_scanner.yaml
+==============================================================================
 """
 
 import asyncio
@@ -46,7 +66,12 @@ logger = logging.getLogger("RunScanner")
 console = Console()
 
 def load_scanner_config():
-    """单独加载 Scanner 策略配置 (用于热更新)"""
+    """
+    🔄 单独加载 Scanner 策略配置 (用于热更新)
+    
+    从 config/scanner/cex/binance_scanner.yaml 读取最新配置。
+    此函数设计为轻量级，以便在主循环中高频调用。
+    """
     base_dir = Path(__file__).resolve().parent
     scanner_conf = {}
     scanner_path = base_dir / "config/scanner/cex/binance_scanner.yaml"
@@ -57,7 +82,12 @@ def load_scanner_config():
     return scanner_conf
 
 def load_config():
-    """加载配置 (Binance API + Scanner)"""
+    """
+    ⚙️ 加载系统配置
+    
+    同时加载基础 API 配置和 Scanner 策略配置。
+    :return: (binance_conf, scanner_conf) 元组
+    """
     base_dir = Path(__file__).resolve().parent
     
     # 1. 加载 Binance API 配置 (用于 REST Client)
@@ -74,7 +104,16 @@ def load_config():
     return binance_conf, scanner_conf
 
 def create_table(title: str, results: List[ScanResult], style: str = "blue") -> Table:
-    """创建单个扫描结果表格"""
+    """
+    🎨 创建单个扫描结果表格 (UI 组件)
+    
+    使用 Rich 库构建美观的终端表格。
+    
+    :param title: 表格标题
+    :param results: 扫描结果列表 List[ScanResult]
+    :param style: 边框颜色风格
+    :return: Rich Table 对象
+    """
     if not results:
         # 空结果表格
         table = Table(title=title, box=box.ROUNDED, border_style=style, expand=True)
@@ -115,7 +154,18 @@ def create_table(title: str, results: List[ScanResult], style: str = "blue") -> 
     return table
 
 def generate_layout(spot_results: List[ScanResult], futures_results: List[ScanResult], last_update: str, interval: int, limit: int = 10) -> Group:
-    """生成整体布局 (Group)"""
+    """
+    📐 生成整体布局 (UI 容器)
+    
+    组合 标题面板 + 现货表格 + 合约表格。
+    
+    :param spot_results: 现货扫描结果
+    :param futures_results: 合约扫描结果
+    :param last_update: 最后更新时间字符串
+    :param interval: 当前扫描间隔
+    :param limit: 显示数量限制
+    :return: Rich Group 对象 (可直接渲染)
+    """
     
     header = Panel(
         Text(f"🚀 CryptoTrade 全币种雷达扫描器 (Radar Mode) | 刷新: {interval}s | 最后更新: {last_update}", justify="center", style="bold magenta"),
@@ -134,7 +184,14 @@ def generate_layout(spot_results: List[ScanResult], futures_results: List[ScanRe
     )
 
 async def main():
-    """主流程"""
+    """
+    🎬 主流程入口
+    
+    1. 初始化环境与客户端
+    2. 执行安全检查 (IP 限频预警)
+    3. 启动 UI 渲染循环
+    4. 协调扫描任务与配置热更新
+    """
     
     # 1. 加载配置
     binance_conf, scanner_conf = load_config()

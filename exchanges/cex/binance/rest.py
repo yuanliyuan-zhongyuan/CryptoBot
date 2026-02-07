@@ -60,7 +60,10 @@ class BinanceRest(BinanceBase):
             logger.info(f"✅ [Binance REST] API Key 已配置")
         else:
             logger.info("⚠️ [Binance REST] 未配置 API Key，仅可访问公共接口")
-
+        # 代理配置
+        self.proxy = self.config.get("api", {}).get("proxy", None)
+        if self.proxy:
+            logger.info(f"🌐 [Binance REST] 使用代理: {self.proxy}")
     async def initialize(self) -> bool:
         """
         🚀 初始化 HTTP 会话
@@ -70,7 +73,8 @@ class BinanceRest(BinanceBase):
         """
         try:
             if not self.session:
-                self.session = aiohttp.ClientSession()
+                # 自动检测使用环境变量中的代理设置
+                self.session = aiohttp.ClientSession(trust_env=True)    
             
             # 测试连接
             await self.health_check()
@@ -143,7 +147,14 @@ class BinanceRest(BinanceBase):
 
         for attempt in range(self.max_retries):
             try:
-                async with self.session.request(method, url, params=params, data=params if method=="POST" else None, headers=headers) as response:
+                async with self.session.request(
+                    method, 
+                    url, 
+                    params=params, 
+                    data=params if method=="POST" else None, 
+                    headers=headers,
+                    proxy=self.proxy
+                ) as response:
                     resp_json = await response.json()
                     
                     if response.status >= 400:

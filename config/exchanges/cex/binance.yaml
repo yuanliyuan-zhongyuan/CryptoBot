@@ -9,6 +9,12 @@
 binance:
   # API连接配置
   api:
+    # 代理配置 (Clash 默认端口)
+    # 如果你的 VPN 端口是 7897，请修改此处
+    # 有代理走 aiohttp （我电脑用这个才能启动，mac）
+    # 无代理走 websockets （公司windows走这条）
+    proxy: "http://127.0.0.1:7890"
+
     environment: mainnet                     # 运行环境：mainnet 或 testnet
     base_urls:                               # HTTP REST 基础域名列表（按文档顺序列出）
       - https://api.binance.com              # 官方默认入口（优先使用）

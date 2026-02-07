@@ -29,7 +29,7 @@ binance_scanner:
     min_safe_interval: 30
     
     # 每次扫描返回的结果数量 (Top N)
-    limit: 20
+    limit: 10
 
   # ============================================================================
   # 市场设置 (Market Settings)
