@@ -22,13 +22,14 @@ import time
 import copy
 import yaml
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
 
 from cryptotrade.exchanges.cex.binance.websocket import BinanceWebSocket
+from cryptotrade.exchanges.cex.binance.rest import BinanceRest
 from cryptotrade.core.services.monitor import PriceMonitorService
 
 # 配置日志 (UI模式下只记录错误，避免打乱界面)
@@ -310,6 +311,59 @@ async def main():
         console.print("[bold red]❌ WebSocket 初始化失败[/]")
         return
 
+    # ==============================================================
+    # 4.5 🚀 REST 预加载 24h 行情 (解决 Futures 24hrTicker WS 推送慢的问题)
+    # ==============================================================
+    # 策略：在 WebSocket 连接的同时，并行用 REST 一次性拉所有 symbol 的 24h 数据
+    # 把 high / low / percentage 先填上，避免表格前几分钟显示 - 或 +0.00%
+    # 之后如果 WS 的 24hrTicker 流推送来了，会在 update 里自动覆盖
+    console.print("[bold yellow]📡 正在用 REST 预加载 24h 行情快照...[/]")
+
+    rest_for_snapshot = BinanceRest(config=binance_conf)
+    try:
+        await rest_for_snapshot.initialize()
+
+        async def _preload_spot_one(sym: str) -> Tuple[str, Optional[Dict]]:
+            try:
+                d = await rest_for_snapshot.get_ticker_24hr(sym)
+                return (sym, d) if isinstance(d, dict) else (sym, None)
+            except Exception:
+                return (sym, None)
+
+        async def _preload_futures_one(sym: str) -> Tuple[str, Optional[Dict]]:
+            try:
+                d = await rest_for_snapshot.get_futures_ticker_24hr(sym)
+                return (sym, d) if isinstance(d, dict) else (sym, None)
+            except Exception:
+                return (sym, None)
+
+        preload_tasks = []
+        for s in spot_symbols:
+            preload_tasks.append(_preload_spot_one(s))
+        for s in futures_symbols:
+            preload_tasks.append(_preload_futures_one(s))
+
+        if preload_tasks:
+            preload_results = await asyncio.gather(*preload_tasks)
+            preloaded_ok = 0
+            for sym, snap in preload_results:
+                if not snap:
+                    continue
+                stats = service.statistics.get(sym)
+                if not stats:
+                    continue
+                stats.apply_24h_snapshot(snap)
+                preloaded_ok += 1
+            console.print(f"[bold green]✅ REST 预加载完成：{preloaded_ok}/{len(preload_tasks)} 个币种[/]")
+    except Exception as e:
+        console.print(f"[bold yellow]⚠️ REST 预加载 24h 行情失败（不影响 WS）: {e}[/]")
+        logger.warning(f"REST 预加载失败: {e}")
+    finally:
+        try:
+            await rest_for_snapshot.close()
+        except Exception:
+            pass
+
     try:
         # 5️⃣ 启动连接
         # 异步启动所有 WS 连接 (并行连接以提高启动速度)
@@ -320,7 +374,18 @@ async def main():
         await asyncio.gather(*connect_tasks)
         
         # 并行订阅
-        subscribe_tasks = [ws.subscribe(ws.symbols, stream_type="ticker") for ws in ws_clients]
+        # 🧩 双流订阅策略：
+        #   1. bookTicker (高频，几毫秒级推送) → 提供 bid/ask 用于现价跳动
+        #   2. ticker (24hrTicker 低频，1~3秒级) → 补充 24h 涨跌幅、高低价、成交量
+        # 现货和合约都采用相同策略，避免合约 24hTicker 推送慢导致的 0 价问题
+        subscribe_tasks = [
+            ws.subscribe(
+                ws.symbols,
+                stream_type="bookTicker",
+                extra_stream_types=["ticker"],
+            )
+            for ws in ws_clients
+        ]
         await asyncio.gather(*subscribe_tasks)
             
         console.print("[bold green]✅ 连接成功！启动实时界面...[/]")

@@ -93,16 +93,28 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
         self.logger.info(f"🚀 [{self.name}] WebSocket ({self.use_backend}) 即将连接到 {self.ws_url}")
         self._tasks.append(asyncio.create_task(self._main_loop()))
 
-    async def subscribe(self, channels: List[str], stream_type: str = "bookTicker") -> None:
+    async def subscribe(
+        self,
+        channels: List[str],
+        stream_type: str = "bookTicker",
+        extra_stream_types: Optional[List[str]] = None,
+    ) -> None:
         """
         订阅指定的频道 (channels 即 symbol 列表)
-        
+
         :param channels: 交易对列表 (如 ['BTCUSDT', 'ETHUSDT'])
-        :param stream_type: 数据流类型，默认 bookTicker，可选 ticker (24h统计)
+        :param stream_type: 主数据流类型，默认 bookTicker，可选 ticker (24h统计)
+        :param extra_stream_types: 额外需要同时订阅的数据流类型列表（如 ['ticker']），
+            用于一个 symbol 同时订阅高频 bookTicker + 低频 24hTicker
         """
-        # 记录当前的流类型，供 _send_subscribe 使用
-        self._current_stream_type = stream_type
-        
+        # 记录当前的流类型列表，供 _send_subscribe 使用
+        streams = [stream_type]
+        if extra_stream_types:
+            for s in extra_stream_types:
+                if s not in streams:
+                    streams.append(s)
+        self._current_stream_types = streams
+
         for s in channels:
             if s not in self.symbols:
                 self.symbols.append(s)
@@ -285,22 +297,35 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
     async def _send_subscribe(self) -> None:
         """
         构造并发送订阅消息
+        - 支持一次订阅多种数据流 (如同时 bookTicker + ticker_24h)
         """
         if not self._ws or not self.symbols:
             return
-        
-        # 使用传入的流类型，或默认 bookTicker
-        stream_type = getattr(self, "_current_stream_type", self.BinanceStreamType.BOOK_TICKER)
-        
-        params = [
-            f"{self.normalize_symbol(s).lower()}@{stream_type}" for s in self.symbols
-        ]
+
+        # 获取当前 stream 列表 (兼容旧变量名)
+        streams: List[str]
+        if hasattr(self, "_current_stream_types"):
+            streams = list(self._current_stream_types)
+        elif hasattr(self, "_current_stream_type"):
+            streams = [self._current_stream_type]
+        else:
+            streams = [self.BinanceStreamType.BOOK_TICKER.value]
+
+        params: List[str] = []
+        for s in self.symbols:
+            norm = self.normalize_symbol(s).lower()
+            for st in streams:
+                params.append(f"{norm}@{st}")
+
+        if not params:
+            return
+
         payload = {
             "method": "SUBSCRIBE",
             "params": params,
             "id": int(time.time() * 1000),
         }
-        
+
         try:
             msg = json.dumps(payload)
             if self.use_backend == "aiohttp":
@@ -326,8 +351,11 @@ class BinanceWebSocket(WebSocketManager, BinanceBase):
             if "result" in data and data["result"] is None:
                 return
                 
-            # 处理 24hrTicker (事件名: "24hrTicker")
-            if "e" in data and data["e"] == "24hrTicker":
+            # 处理 24hrTicker / 24hTicker (现货/合约 24小时统计)
+            # 🧩 注意：
+            #   - 现货 Binance 事件名 = "24hrTicker"
+            #   - 合约 Binance 可能推 "24hTicker" (少一个 r) 或 "24hrTicker"，两者都接受
+            if "e" in data and data["e"] in ("24hrTicker", "24hTicker"):
                 symbol_raw = data["s"].upper()
                 target_symbol = self.symbol_map.get(symbol_raw)
                 if not target_symbol:

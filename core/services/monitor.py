@@ -41,7 +41,7 @@ import time
 from collections import deque
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Deque, Union
+from typing import Any, Deque, Dict, List, Optional, Union
 
 from cryptotrade.core.adapters.models import TickerData
 
@@ -82,11 +82,21 @@ class SymbolStatistics:
         🔄 更新统计数据
         - 将最新行情写入到统计对象
         - 维护用于波动率计算的价格历史 (timestamp, price)
+        - 🧩 兼容两种数据来源：
+            1) 24hrTicker: 有 last / percentage / high / low (一次性给全)
+            2) bookTicker: 只有 bid / ask (高频推送)，用 (bid+ask)/2 中间价当 current_price
         """
+        price_to_use: Optional[Decimal] = None
+
         if ticker.last:
-            self.current_price = ticker.last
-            self.price_history.append((time.time(), ticker.last))
-        
+            price_to_use = ticker.last
+        elif ticker.bid and ticker.ask and ticker.bid > 0 and ticker.ask > 0:
+            price_to_use = (ticker.bid + ticker.ask) / Decimal("2")
+
+        if price_to_use is not None and price_to_use > 0:
+            self.current_price = price_to_use
+            self.price_history.append((time.time(), price_to_use))
+
         if ticker.percentage:
             self.change_percent_24h = float(ticker.percentage)
 
@@ -94,8 +104,49 @@ class SymbolStatistics:
             self.high_24h = ticker.high
         if ticker.low:
             self.low_24h = ticker.low
-            
+
         self.last_update_time = datetime.now()
+
+    def apply_24h_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        """
+        🚀 REST 预加载 24h 行情快照
+        - 解决 Binance Futures 的 24hrTicker WS 流推送慢/根本推不到的问题
+        - 在启动时用 REST 先把 high / low / percentage / last 填上
+        - 后续 WS 来了再增量覆盖
+        :param snapshot: Binance REST /api/v3/ticker/24hr (或 /fapi/v1/ticker/24hr) 返回的 dict
+            字段: lastPrice=c, priceChangePercent=P, highPrice=h, lowPrice=l, openPrice=o
+        """
+        def _to_decimal(k: str) -> Optional[Decimal]:
+            v = snapshot.get(k)
+            if v is None or v == "":
+                return None
+            try:
+                d = Decimal(str(v))
+                return d if d > 0 else None
+            except Exception:
+                return None
+
+        pct = snapshot.get("priceChangePercent")
+        if pct is not None and pct != "":
+            try:
+                self.change_percent_24h = float(Decimal(str(pct)))
+            except Exception:
+                pass
+
+        last = _to_decimal("lastPrice")
+        if last and last > 0 and (not self.current_price or self.current_price == 0):
+            self.current_price = last
+            self.price_history.append((time.time(), last))
+
+        high = _to_decimal("highPrice")
+        if high and high > 0:
+            self.high_24h = high
+        low = _to_decimal("lowPrice")
+        if low and low > 0:
+            self.low_24h = low
+
+        if self.last_update_time is None:
+            self.last_update_time = datetime.now()
 
     def get_window_change(self, window_seconds: int) -> Optional[float]:
         """
